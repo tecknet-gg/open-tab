@@ -5,7 +5,7 @@ import { SongsterrRevisionJsonService } from '../services/songsterr-revision-jso
 import { SongsterrToAlphaTabConverter } from '../services/converter/songsterr-to-alphatab';
 import { SongsterrService } from '../services/songsterr';
 
-const DEFAULT_DOWNLOAD_DIR = join(homedir(), 'Documents', 'tabs');
+const DEFAULT_DOWNLOAD_DIR = join(homedir(), 'Documents', 'tabs'); // Change to tauri/src/tabs or similar
 
 export default defineEventHandler(async (event) => {
   const body = await readBody(event);
