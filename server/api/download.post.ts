@@ -1,6 +1,7 @@
-import { writeFile, mkdir } from 'node:fs/promises';
+import { writeFile, mkdir, access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { execFile } from 'node:child_process';
 import { SongsterrToAlphaTabConverter } from '../services/converter/songsterr-to-alphatab';
 import { SongsterrService } from '../services/songsterr';
 import type { TabMetadata, SongsterrStateMetaCurrent } from '../types';
@@ -16,10 +17,11 @@ function sanitizeDirName(name: string): string {
 
 export default defineEventHandler(async (event) => {
   const body = await readBody(event);
-  const { songId, revisionId: requestedRevisionId, format = 'gp7' } = body as {
+  const { songId, revisionId: requestedRevisionId, format = 'gp7', video = false } = body as {
     songId: number;
     revisionId?: number;
     format?: 'gp7' | 'midi';
+    video?: boolean;
   };
 
   if (!songId) {
@@ -157,16 +159,53 @@ export default defineEventHandler(async (event) => {
     const metadataPath = join(outputDir, 'metadata.json');
     await writeFile(metadataPath, JSON.stringify(metadata, null, 2));
 
+    // Download YouTube video if requested
+    let videoFile: string | null = null;
+    if (video && syncVideo?.videoId) {
+      const videoUrl = `https://www.youtube.com/watch?v=${syncVideo.videoId}`;
+      const videoOutput = join(outputDir, `${songDir}.%(ext)s`);
+
+      await new Promise<void>((resolve, reject) => {
+        execFile('yt-dlp', [
+          '-f', 'bestaudio[ext=m4a]/bestaudio/best',
+          '--no-playlist',
+          '-o', videoOutput,
+          videoUrl,
+        ], { timeout: 120_000 }, (error, stdout, stderr) => {
+          if (error) {
+            reject(new Error(`yt-dlp failed: ${stderr || error.message}`));
+          } else {
+            resolve();
+          }
+        });
+      });
+
+      // Find the downloaded file (yt-dlp picks the extension)
+      const exts = ['m4a', 'mp3', 'opus', 'webm', 'mp4'];
+      for (const ext of exts) {
+        const candidate = join(outputDir, `${songDir}.${ext}`);
+        try {
+          await access(candidate);
+          videoFile = `${songDir}.${ext}`;
+          break;
+        } catch {}
+      }
+    }
+
     const durationMs = Math.round(performance.now() - startedAt);
+
+    const files = [fileName, 'metadata.json'];
+    if (videoFile) files.push(videoFile);
 
     return {
       success: true,
       dir: outputDir,
-      files: [fileName, 'metadata.json'],
+      files,
       artist: stateMeta.artist,
       title: stateMeta.title,
       trackCount: revisions.length,
       hasSync: !!syncVideo,
+      videoFile,
       format,
       sizeBytes: data.byteLength,
       durationMs,
