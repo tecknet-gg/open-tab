@@ -43,12 +43,13 @@ async function downloadAudio(url: string, outputPath: string): Promise<void> {
 
 export default defineEventHandler(async (event) => {
   const body = await readBody(event);
-  const { songId, revisionId: requestedRevisionId, format = 'gp7', video = false, main = false } = body as {
+  const { songId, revisionId: requestedRevisionId, format = 'gp7', video = false, main = false, all = false } = body as {
     songId: number;
     revisionId?: number;
     format?: 'gp7' | 'midi';
     video?: boolean;
     main?: boolean;
+    all?: boolean;
   };
 
   if (!songId) {
@@ -85,6 +86,25 @@ export default defineEventHandler(async (event) => {
     const syncVideo = main
       ? allVideos.find(v => v.feature === null) ?? null
       : await songsterrService.getMainVideoSync(songId, revisionId);
+
+    // Select which videos to download
+    const videosToDownload: SongsterrVideoRecord[] = [];
+    if (main && allVideos.length > 0) {
+      if (all) {
+        // Download all variants
+        videosToDownload.push(...allVideos);
+      } else {
+        // Pick one of each type
+        const seen = new Set<string>();
+        for (const v of allVideos) {
+          const key = v.feature ?? 'main';
+          if (!seen.has(key)) {
+            seen.add(key);
+            videosToDownload.push(v);
+          }
+        }
+      }
+    }
 
     // Build stateMeta for the converter
     const tracks = meta.tracks || [];
@@ -200,16 +220,16 @@ export default defineEventHandler(async (event) => {
     // Download audio files
     const audioFiles: string[] = [];
 
-    if (main && allVideos.length > 0) {
-      // Download all videos
+    if (videosToDownload.length > 0) {
+      // Count per feature type for naming
       const featureCounts = new Map<string, number>();
-      for (const v of allVideos) {
+      for (const v of videosToDownload) {
         const key = v.feature ?? 'main';
         featureCounts.set(key, (featureCounts.get(key) ?? 0) + 1);
       }
 
       const featureIndices = new Map<string, number>();
-      for (const v of allVideos) {
+      for (const v of videosToDownload) {
         const key = v.feature ?? 'main';
         const idx = featureIndices.get(key) ?? 0;
         featureIndices.set(key, idx + 1);
@@ -220,14 +240,12 @@ export default defineEventHandler(async (event) => {
 
         try {
           await downloadAudio(videoUrl, join(outputDir, `${songDir}-tmp-${v.videoId}`));
-          // yt-dlp may change extension, find the actual file
           const exts = ['mp3', 'm4a', 'opus', 'webm'];
           let found = false;
           for (const ext of exts) {
             const candidate = join(outputDir, `${songDir}-tmp-${v.videoId}.${ext}`);
             try {
               await access(candidate);
-              // Rename to final name
               const { rename } = await import('node:fs/promises');
               await rename(candidate, audioPath);
               audioFiles.push(audioName);
@@ -236,7 +254,6 @@ export default defineEventHandler(async (event) => {
             } catch {}
           }
           if (!found) {
-            // Fallback: yt-dlp may have named it differently
             const candidate = join(outputDir, `${songDir}-tmp-${v.videoId}.mp3`);
             try {
               await access(candidate);
@@ -245,8 +262,8 @@ export default defineEventHandler(async (event) => {
               audioFiles.push(audioName);
             } catch {}
           }
-        } catch (err) {
-          // Skip failed downloads, continue with others
+        } catch {
+          // Skip failed downloads
         }
       }
     } else if (video && syncVideo?.videoId) {
