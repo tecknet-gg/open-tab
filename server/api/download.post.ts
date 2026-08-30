@@ -167,7 +167,8 @@ export default defineEventHandler(async (event) => {
 
       await new Promise<void>((resolve, reject) => {
         execFile('yt-dlp', [
-          '-f', 'bestaudio[ext=m4a]/bestaudio/best',
+          '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+          '--merge-output-format', 'mp4',
           '--no-playlist',
           '-o', videoOutput,
           videoUrl,
@@ -180,16 +181,12 @@ export default defineEventHandler(async (event) => {
         });
       });
 
-      // Find the downloaded file (yt-dlp picks the extension)
-      const exts = ['m4a', 'mp3', 'opus', 'webm', 'mp4'];
-      for (const ext of exts) {
-        const candidate = join(outputDir, `${songDir}.${ext}`);
-        try {
-          await access(candidate);
-          videoFile = `${songDir}.${ext}`;
-          break;
-        } catch {}
-      }
+      // Find the downloaded file
+      const candidate = join(outputDir, `${songDir}.mp4`);
+      try {
+        await access(candidate);
+        videoFile = `${songDir}.mp4`;
+      } catch {}
     }
 
     const durationMs = Math.round(performance.now() - startedAt);
