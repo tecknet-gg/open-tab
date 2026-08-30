@@ -123,3 +123,31 @@ export interface ConversionWarning {
   message: string;
   location?: string;
 }
+
+export interface SongsterrSearchParams {
+  query: string;
+  inst?: string;
+  tuning?: number[]
+  difficulty?: number
+  size?: number;
+  more?: boolean;
+}
+
+export interface SearchResults {
+  songId: number;
+  title: string;
+  artist: string;
+  source: string;
+  tracks: Tracks[]
+}
+
+export interface Tracks {
+  trackId: number;
+  instId: number;
+  instName: string;
+  tuning: number[]
+}
+
+export interface Sync{
+
+}

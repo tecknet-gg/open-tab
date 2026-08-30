@@ -1,4 +1,5 @@
 import type { SongsterrPartialMetadata } from '../types';
+import type { SongsterrSearchParams, SearchResults } from '../types';
 import { scraper } from '../utils/scraper';
 
 export class SongsterrService {
@@ -42,5 +43,43 @@ export class SongsterrService {
     if (url.endsWith('.gp5')) return '.gp5';
     if (url.endsWith('.mid')) return '.mid';
     return '.gp';
+  }
+
+  private async fetchSearch(params: SongsterrSearchParams): Promise<unknown> {
+    const {
+        query,
+        inst,
+        tuning,
+        difficulty,
+        size = 50,
+        more = true,
+    } = params;
+    const searchParams = new URLSearchParams();
+
+    searchParams.set("pattern", query);
+    searchParams.set("size", String(size));
+    searchParams.set("more", String(more));
+    searchParams.set("from", "0")
+
+    const url = `https://songsterr.com/api/search?${searchParams.toString()}`;
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch search results: ${response.statusText}`);
+    }
+    return await response.json();
+  }
+
+
+
+  private normaliseSearchResults(response: unknown): SearchResults[] {
+    console.log(response);
+    return [];
+
+  }
+
+  async search(params: SongsterrSearchParams): Promise<SearchResults[]> {
+    const response = await this.fetchSearch(params);
+    return this.normaliseSearchResults(response);
   }
 }

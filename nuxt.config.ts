@@ -4,7 +4,7 @@ export default defineNuxtConfig({
   devtools: { enabled: true },
   nitro: {
     typescript: {
-      tsconfig: {
+      tsConfig: {
         compilerOptions: {
           types: ['node']
         }
