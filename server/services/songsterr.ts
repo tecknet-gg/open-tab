@@ -3,6 +3,8 @@ import type {
   SongsterrPartialMetadata,
   SongsterrSearchParams,
   SongsterrSearchResponse,
+  SongsterrRevision,
+  SongsterrVideoRecord,
 } from '../types';
 import { scraper } from '../utils/scraper';
 
@@ -82,6 +84,44 @@ export class SongsterrService {
     }
 
     return await response.json() as SongsterrSearchResponse;
+  }
+
+  async getRevisions(songId: number): Promise<SongsterrRevision[]> {
+    const url = `https://www.songsterr.com/api/meta/${songId}/revisions`;
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to fetch revisions for song ${songId}: ${response.status} ${response.statusText}`
+      );
+    }
+
+    return await response.json() as SongsterrRevision[];
+  }
+
+  async getLatestRevision(songId: number): Promise<SongsterrRevision> {
+    const revisions = await this.getRevisions(songId);
+    const latest = revisions.find(r => !r.isDeleted && !r.isBlocked);
+    if (!latest) throw new Error(`No valid revision found for song ${songId}`);
+    return latest;
+  }
+
+  async getVideoPoints(songId: number, revisionId: number): Promise<SongsterrVideoRecord[]> {
+    const url = `https://www.songsterr.com/api/video-points/${songId}/${revisionId}/list`;
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to fetch video points for song ${songId}: ${response.status} ${response.statusText}`
+      );
+    }
+
+    return await response.json() as SongsterrVideoRecord[];
+  }
+
+  async getMainVideoSync(songId: number, revisionId: number): Promise<SongsterrVideoRecord | null> {
+    const videos = await this.getVideoPoints(songId, revisionId);
+    return videos.find(v => v.feature === null && v.status === 'done') ?? null;
   }
 
   private normaliseSearchResults(response: SongsterrSearchResponse): SearchResult[] {

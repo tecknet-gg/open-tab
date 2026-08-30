@@ -169,3 +169,44 @@ export interface SongsterrTrack {
   difficulty?: number;
   hash: string;
 }
+
+export interface SongsterrRevision {
+  revisionId: number;
+  createdAt: string;
+  author: string;
+  description?: string;
+  isDeleted?: boolean;
+  isBlocked?: boolean;
+}
+
+export interface SongsterrVideoRecord {
+  id: number;
+  revisionToVideoId: number;
+  songId: number;
+  revisionId: number;
+  videoId: string;
+  feature: 'backing' | 'solo' | 'alternative' | null;
+  status: string;
+  points: number[];
+  trackHashes: string[] | null;
+  tracks: unknown[] | null;
+  countries: unknown[] | null;
+  problematic: unknown[] | null;
+  alternativeVideos: unknown[] | null;
+}
+
+export interface TabMetadata {
+  songId: number;
+  revisionId: number;
+  title: string;
+  artist: string;
+  artistId?: number;
+  source: string;
+  format: string;
+  tracks: Track[];
+  sync?: {
+    videoId: string;
+    points: number[];
+    feature: string | null;
+  } | null;
+}
