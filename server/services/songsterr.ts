@@ -1,5 +1,9 @@
-import type { SongsterrPartialMetadata } from '../types';
-import type { SongsterrSearchParams, SearchResults } from '../types';
+import type {
+  SearchResult,
+  SongsterrPartialMetadata,
+  SongsterrSearchParams,
+  SongsterrSearchResponse,
+} from '../types';
 import { scraper } from '../utils/scraper';
 
 export class SongsterrService {
@@ -13,6 +17,14 @@ export class SongsterrService {
     if (!state?.meta?.current) throw new Error('Error reading tab data');
 
     return state.meta.current;
+  }
+
+  async search(
+    params: SongsterrSearchParams
+  ): Promise<SearchResult[]> {
+    const response = await this.fetchSearch(params);
+
+    return this.normaliseSearchResults(response);
   }
 
   buildFileNameFromSongName(songName: string, downloadUrl: string): string {
@@ -45,41 +57,46 @@ export class SongsterrService {
     return '.gp';
   }
 
-  private async fetchSearch(params: SongsterrSearchParams): Promise<unknown> {
+  private async fetchSearch(params: SongsterrSearchParams): Promise<SongsterrSearchResponse> {
     const {
-        query,
-        inst,
-        tuning,
-        difficulty,
-        size = 50,
-        more = true,
+      query,
+      size = 50,
+      more = true,
     } = params;
+
     const searchParams = new URLSearchParams();
 
-    searchParams.set("pattern", query);
-    searchParams.set("size", String(size));
-    searchParams.set("more", String(more));
-    searchParams.set("from", "0")
+    searchParams.set('pattern', query);
+    searchParams.set('size', String(size));
+    searchParams.set('from', '0');
+    searchParams.set('more', String(more));
 
-    const url = `https://songsterr.com/api/search?${searchParams.toString()}`;
+    const url = `https://www.songsterr.com/api/search?${searchParams.toString()}`;
+
     const response = await fetch(url);
 
     if (!response.ok) {
-      throw new Error(`Failed to fetch search results: ${response.statusText}`);
+      throw new Error(
+        `Failed to fetch Songsterr search results: ${response.status} ${response.statusText}`
+      );
     }
-    return await response.json();
+
+    return await response.json() as SongsterrSearchResponse;
   }
 
-
-
-  private normaliseSearchResults(response: unknown): SearchResults[] {
-    console.log(response);
-    return [];
-
-  }
-
-  async search(params: SongsterrSearchParams): Promise<SearchResults[]> {
-    const response = await this.fetchSearch(params);
-    return this.normaliseSearchResults(response);
+  private normaliseSearchResults(response: SongsterrSearchResponse): SearchResult[] {
+    return response.records.map((record) => ({
+      songId: record.songId,
+      title: record.title,
+      artist: record.artist,
+      source: 'songsterr',
+      tracks: record.tracks.map((track) => ({
+        instrumentId: track.instrumentId,
+        instrument: track.instrument,
+        tuning: track.tuning,
+        difficulty: track.difficulty,
+        hash: track.hash,
+      })),
+    }));
   }
 }

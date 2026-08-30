@@ -127,27 +127,45 @@ export interface ConversionWarning {
 export interface SongsterrSearchParams {
   query: string;
   inst?: string;
-  tuning?: number[]
-  difficulty?: number
+  tuning?: number[];
+  difficulty?: number;
   size?: number;
   more?: boolean;
 }
 
-export interface SearchResults {
+export interface SearchResult {
   songId: number;
   title: string;
   artist: string;
   source: string;
-  tracks: Tracks[]
+  tracks: Track[];
 }
 
-export interface Tracks {
-  trackId: number;
-  instId: number;
-  instName: string;
-  tuning: number[]
+export interface Track {
+  instrumentId: number;
+  instrument: string;
+  tuning?: number[];
+  difficulty?: number;
+  hash: string;
 }
 
-export interface Sync{
+export interface SongsterrSearchResponse {
+  records: SongsterrSearchRecord[];
+}
 
+export interface SongsterrSearchRecord {
+  songId: number;
+  artist: string;
+  title: string;
+  tracks: SongsterrTrack[];
+}
+
+export interface SongsterrTrack {
+  instrumentId: number;
+  instrument: string;
+  views: number;
+  name: string;
+  tuning?: number[];
+  difficulty?: number;
+  hash: string;
 }
