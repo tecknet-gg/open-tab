@@ -124,6 +124,11 @@ export class SongsterrService {
     return videos.find(v => v.feature === null && v.status === 'done') ?? null;
   }
 
+  async getAllDoneVideos(songId: number, revisionId: number): Promise<SongsterrVideoRecord[]> {
+    const videos = await this.getVideoPoints(songId, revisionId);
+    return videos.filter(v => v.status === 'done');
+  }
+
   private normaliseSearchResults(response: SongsterrSearchResponse): SearchResult[] {
     return response.records.map((record) => ({
       songId: record.songId,

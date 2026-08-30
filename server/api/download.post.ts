@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { execFile } from 'node:child_process';
 import { SongsterrToAlphaTabConverter } from '../services/converter/songsterr-to-alphatab';
 import { SongsterrService } from '../services/songsterr';
-import type { TabMetadata, SongsterrStateMetaCurrent } from '../types';
+import type { TabMetadata, SyncEntry, SongsterrStateMetaCurrent, SongsterrVideoRecord } from '../types';
 
 const DEFAULT_DOWNLOAD_DIR = join(homedir(), 'Documents', 'tabs');
 
@@ -15,13 +15,40 @@ function sanitizeDirName(name: string): string {
     .trim();
 }
 
+function buildAudioFileName(songDir: string, feature: string | null, index: number, total: number): string {
+  if (feature === null) return `${songDir}.mp3`;
+  const sameFeatureCount = total;
+  if (sameFeatureCount === 1) return `${songDir}-${feature}.mp3`;
+  return `${songDir}-${feature}-${index + 1}.mp3`;
+}
+
+async function downloadAudio(url: string, outputPath: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    execFile('yt-dlp', [
+      '-f', 'bestaudio/best',
+      '-x',
+      '--audio-format', 'mp3',
+      '--no-playlist',
+      '-o', outputPath,
+      url,
+    ], { timeout: 120_000 }, (error, _stdout, stderr) => {
+      if (error) {
+        reject(new Error(`yt-dlp failed: ${stderr || error.message}`));
+      } else {
+        resolve();
+      }
+    });
+  });
+}
+
 export default defineEventHandler(async (event) => {
   const body = await readBody(event);
-  const { songId, revisionId: requestedRevisionId, format = 'gp7', video = false } = body as {
+  const { songId, revisionId: requestedRevisionId, format = 'gp7', video = false, main = false } = body as {
     songId: number;
     revisionId?: number;
     format?: 'gp7' | 'midi';
     video?: boolean;
+    main?: boolean;
   };
 
   if (!songId) {
@@ -52,9 +79,14 @@ export default defineEventHandler(async (event) => {
     const meta = await metaRes.json() as any;
 
     // Get sync points
-    const syncVideo = await songsterrService.getMainVideoSync(songId, revisionId);
+    const allVideos = main
+      ? await songsterrService.getAllDoneVideos(songId, revisionId)
+      : [];
+    const syncVideo = main
+      ? allVideos.find(v => v.feature === null) ?? null
+      : await songsterrService.getMainVideoSync(songId, revisionId);
 
-    // Build stateMeta for the converter (it needs this shape)
+    // Build stateMeta for the converter
     const tracks = meta.tracks || [];
     const stateMeta: SongsterrStateMetaCurrent = {
       songId: meta.songId,
@@ -80,7 +112,6 @@ export default defineEventHandler(async (event) => {
         try {
           const res = await fetch(cdnUrl);
           if (!res.ok) {
-            // Try fallback CDN
             const fallbackUrl = `https://d3d3l6a6rcgkaf.cloudfront.net/${songId}/${revisionId}/${meta.image}/${partId}.json`;
             const fallbackRes = await fetch(fallbackUrl);
             if (!fallbackRes.ok) return null;
@@ -132,6 +163,17 @@ export default defineEventHandler(async (event) => {
     );
     await writeFile(filePath, new Uint8Array(buffer));
 
+    // Build sync entries
+    const toSyncEntry = (v: SongsterrVideoRecord): SyncEntry => ({
+      videoId: v.videoId,
+      points: v.points,
+      feature: v.feature,
+      trackHashes: v.trackHashes ?? [],
+    });
+
+    const allSync: SyncEntry[] = main ? allVideos.map(toSyncEntry) : [];
+    const primarySync: SyncEntry | null = syncVideo ? toSyncEntry(syncVideo) : null;
+
     // Build and write metadata.json
     const metadata: TabMetadata = {
       songId,
@@ -146,54 +188,84 @@ export default defineEventHandler(async (event) => {
         instrument: t.instrument || '',
         tuning: t.tuning,
         hash: t.hash || '',
+        difficulty: t.difficulty,
       })),
-      sync: syncVideo
-        ? {
-            videoId: syncVideo.videoId,
-            points: syncVideo.points,
-            feature: syncVideo.feature,
-          }
-        : null,
+      sync: primarySync,
+      allSync: allSync.length > 0 ? allSync : undefined,
     };
 
     const metadataPath = join(outputDir, 'metadata.json');
     await writeFile(metadataPath, JSON.stringify(metadata, null, 2));
 
-    // Download YouTube video if requested
-    let videoFile: string | null = null;
-    if (video && syncVideo?.videoId) {
+    // Download audio files
+    const audioFiles: string[] = [];
+
+    if (main && allVideos.length > 0) {
+      // Download all videos
+      const featureCounts = new Map<string, number>();
+      for (const v of allVideos) {
+        const key = v.feature ?? 'main';
+        featureCounts.set(key, (featureCounts.get(key) ?? 0) + 1);
+      }
+
+      const featureIndices = new Map<string, number>();
+      for (const v of allVideos) {
+        const key = v.feature ?? 'main';
+        const idx = featureIndices.get(key) ?? 0;
+        featureIndices.set(key, idx + 1);
+
+        const audioName = buildAudioFileName(songDir, v.feature, idx, featureCounts.get(key)!);
+        const audioPath = join(outputDir, audioName);
+        const videoUrl = `https://www.youtube.com/watch?v=${v.videoId}`;
+
+        try {
+          await downloadAudio(videoUrl, join(outputDir, `${songDir}-tmp-${v.videoId}`));
+          // yt-dlp may change extension, find the actual file
+          const exts = ['mp3', 'm4a', 'opus', 'webm'];
+          let found = false;
+          for (const ext of exts) {
+            const candidate = join(outputDir, `${songDir}-tmp-${v.videoId}.${ext}`);
+            try {
+              await access(candidate);
+              // Rename to final name
+              const { rename } = await import('node:fs/promises');
+              await rename(candidate, audioPath);
+              audioFiles.push(audioName);
+              found = true;
+              break;
+            } catch {}
+          }
+          if (!found) {
+            // Fallback: yt-dlp may have named it differently
+            const candidate = join(outputDir, `${songDir}-tmp-${v.videoId}.mp3`);
+            try {
+              await access(candidate);
+              const { rename } = await import('node:fs/promises');
+              await rename(candidate, audioPath);
+              audioFiles.push(audioName);
+            } catch {}
+          }
+        } catch (err) {
+          // Skip failed downloads, continue with others
+        }
+      }
+    } else if (video && syncVideo?.videoId) {
+      // Single video download (original behavior)
       const videoUrl = `https://www.youtube.com/watch?v=${syncVideo.videoId}`;
       const videoOutput = join(outputDir, `${songDir}.%(ext)s`);
 
-      await new Promise<void>((resolve, reject) => {
-        execFile('yt-dlp', [
-          '-f', 'bestaudio/best',
-          '-x',
-          '--audio-format', 'mp3',
-          '--no-playlist',
-          '-o', videoOutput,
-          videoUrl,
-        ], { timeout: 120_000 }, (error, stdout, stderr) => {
-          if (error) {
-            reject(new Error(`yt-dlp failed: ${stderr || error.message}`));
-          } else {
-            resolve();
-          }
-        });
-      });
+      await downloadAudio(videoUrl, videoOutput);
 
-      // Find the downloaded file
       const candidate = join(outputDir, `${songDir}.mp3`);
       try {
         await access(candidate);
-        videoFile = `${songDir}.mp3`;
+        audioFiles.push(`${songDir}.mp3`);
       } catch {}
     }
 
     const durationMs = Math.round(performance.now() - startedAt);
 
-    const files = [fileName, 'metadata.json'];
-    if (videoFile) files.push(videoFile);
+    const files = [fileName, 'metadata.json', ...audioFiles];
 
     return {
       success: true,
@@ -203,7 +275,7 @@ export default defineEventHandler(async (event) => {
       title: stateMeta.title,
       trackCount: revisions.length,
       hasSync: !!syncVideo,
-      videoFile,
+      audioFiles,
       format,
       sizeBytes: data.byteLength,
       durationMs,

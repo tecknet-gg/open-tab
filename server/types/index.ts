@@ -195,6 +195,13 @@ export interface SongsterrVideoRecord {
   alternativeVideos: unknown[] | null;
 }
 
+export interface SyncEntry {
+  videoId: string;
+  points: number[];
+  feature: string | null;
+  trackHashes: string[];
+}
+
 export interface TabMetadata {
   songId: number;
   revisionId: number;
@@ -204,9 +211,6 @@ export interface TabMetadata {
   source: string;
   format: string;
   tracks: Track[];
-  sync?: {
-    videoId: string;
-    points: number[];
-    feature: string | null;
-  } | null;
+  sync?: SyncEntry | null;
+  allSync?: SyncEntry[];
 }
