@@ -56,7 +56,8 @@ Download a tab as GP7/MIDI, with optional audio from YouTube.
 | `revisionId` | number  | No       | latest  | Specific revision ID. Omit to use latest. |
 | `format`     | string  | No       | `gp7`   | `gp7` or `midi` |
 | `video`      | boolean | No       | `false` | If `true`, downloads synced main audio as MP3 |
-| `main`       | boolean | No       | `false` | If `true`, downloads ALL audio variants (main + backing + solo + alternative) with full sync data |
+| `main`       | boolean | No       | `false` | If `true`, downloads one audio of each type (main + backing + solo + alternative) |
+| `all`        | boolean | No       | `false` | If `true` with `main`, downloads every variant instead of one per type |
 
 **Request Example:**
 
@@ -92,9 +93,9 @@ Download a tab as GP7/MIDI, with optional audio from YouTube.
 ├── {Song}.gp              # Tab file (or .mid)
 ├── metadata.json          # Song info + sync points
 ├── {Song}.mp3             # Main audio (if video or main)
-├── {Song}-backing-1.mp3   # Backing tracks (if main)
-├── {Song}-solo-1.mp3      # Solo tracks (if main)
-└── ...
+├── {Song}-backing.mp3     # One backing track (if main)
+├── {Song}-solo.mp3        # One solo track (if main)
+└── {Song}-alternative.mp3 # One alternative (if main)
 ```
 
 **metadata.json:**
@@ -145,6 +146,7 @@ Download a tab as GP7/MIDI, with optional audio from YouTube.
 - `sync.points[i]` = timestamp in seconds where beat `i` occurs in the YouTube video
 - `sync.feature` = `null` for main audio, `"backing"` / `"solo"` / `"alternative"` for variants
 - `sync.trackHashes` — links backing/solo to specific tracks (e.g. `["guitar_ShPQAFDe"]`)
+- When `main: true` without `all`, only one audio per type is downloaded but `allSync` still lists all available variants
 
 **Errors:**
 
