@@ -55,7 +55,8 @@ Download a tab as GP7/MIDI, with optional audio from YouTube.
 | `songId`     | number  | Yes      | —       | Songsterr song ID (from search results) |
 | `revisionId` | number  | No       | latest  | Specific revision ID. Omit to use latest. |
 | `format`     | string  | No       | `gp7`   | `gp7` or `midi` |
-| `video`      | boolean | No       | `false` | If `true`, downloads synced audio as MP3 via yt-dlp |
+| `video`      | boolean | No       | `false` | If `true`, downloads synced main audio as MP3 |
+| `main`       | boolean | No       | `false` | If `true`, downloads ALL audio variants (main + backing + solo + alternative) with full sync data |
 
 **Request Example:**
 
@@ -88,9 +89,12 @@ Download a tab as GP7/MIDI, with optional audio from YouTube.
 
 ```
 ~/Documents/tabs/{Artist}/{Song}/
-├── {Song}.gp          # Tab file (or .mid)
-├── metadata.json      # Song info + sync points
-└── {Song}.mp3         # Only if video: true
+├── {Song}.gp              # Tab file (or .mid)
+├── metadata.json          # Song info + sync points
+├── {Song}.mp3             # Main audio (if video or main)
+├── {Song}-backing-1.mp3   # Backing tracks (if main)
+├── {Song}-solo-1.mp3      # Solo tracks (if main)
+└── ...
 ```
 
 **metadata.json:**
@@ -109,20 +113,38 @@ Download a tab as GP7/MIDI, with optional audio from YouTube.
       "instrumentId": 25,
       "instrument": "Acoustic Guitar (steel)",
       "tuning": [64, 59, 55, 50, 45, 40],
+      "difficulty": 2,
       "hash": "guitar_ShPQAFDe"
     }
   ],
   "sync": {
     "videoId": "W-Khe7DInxo",
     "points": [0, 1.86, 3.62, 5.39, ...],
-    "feature": null
-  }
+    "feature": null,
+    "trackHashes": []
+  },
+  "allSync": [
+    {
+      "videoId": "W-Khe7DInxo",
+      "points": [0, 1.86, ...],
+      "feature": null,
+      "trackHashes": []
+    },
+    {
+      "videoId": "1rscqlNZr3s",
+      "points": [0, 1.86, ...],
+      "feature": "backing",
+      "trackHashes": ["guitar_ShPQAFDe"]
+    }
+  ]
 }
 ```
 
+- `sync` — primary/main sync entry (always present if sync data exists)
+- `allSync` — all video sync entries (only when `main: true`)
 - `sync.points[i]` = timestamp in seconds where beat `i` occurs in the YouTube video
 - `sync.feature` = `null` for main audio, `"backing"` / `"solo"` / `"alternative"` for variants
-- `sync` is `null` if no sync data available
+- `sync.trackHashes` — links backing/solo to specific tracks (e.g. `["guitar_ShPQAFDe"]`)
 
 **Errors:**
 
