@@ -167,8 +167,9 @@ export default defineEventHandler(async (event) => {
 
       await new Promise<void>((resolve, reject) => {
         execFile('yt-dlp', [
-          '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-          '--merge-output-format', 'mp4',
+          '-f', 'bestaudio/best',
+          '-x',
+          '--audio-format', 'mp3',
           '--no-playlist',
           '-o', videoOutput,
           videoUrl,
@@ -182,10 +183,10 @@ export default defineEventHandler(async (event) => {
       });
 
       // Find the downloaded file
-      const candidate = join(outputDir, `${songDir}.mp4`);
+      const candidate = join(outputDir, `${songDir}.mp3`);
       try {
         await access(candidate);
-        videoFile = `${songDir}.mp4`;
+        videoFile = `${songDir}.mp3`;
       } catch {}
     }
 
