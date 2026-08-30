@@ -122,20 +122,26 @@ Download a tab as GP7/MIDI, with optional audio from YouTube.
     "videoId": "W-Khe7DInxo",
     "points": [0, 1.86, 3.62, 5.39, ...],
     "feature": null,
-    "trackHashes": []
+    "trackHashes": [],
+    "name": "main",
+    "audioFile": "Scott Street.mp3"
   },
   "allSync": [
     {
       "videoId": "W-Khe7DInxo",
       "points": [0, 1.86, ...],
       "feature": null,
-      "trackHashes": []
+      "trackHashes": [],
+      "name": "main",
+      "audioFile": "Scott Street.mp3"
     },
     {
       "videoId": "1rscqlNZr3s",
       "points": [0, 1.86, ...],
       "feature": "backing",
-      "trackHashes": ["guitar_ShPQAFDe"]
+      "trackHashes": ["guitar_ShPQAFDe"],
+      "name": "backing",
+      "audioFile": "Scott Street-backing.mp3"
     }
   ]
 }
@@ -146,7 +152,8 @@ Download a tab as GP7/MIDI, with optional audio from YouTube.
 - `sync.points[i]` = timestamp in seconds where beat `i` occurs in the YouTube video
 - `sync.feature` = `null` for main audio, `"backing"` / `"solo"` / `"alternative"` for variants
 - `sync.trackHashes` — links backing/solo to specific tracks (e.g. `["guitar_ShPQAFDe"]`)
-- When `main: true` without `all`, only one audio per type is downloaded but `allSync` still lists all available variants
+- `sync.name` — `"main"`, `"backing"`, `"solo"`, or `"alternative"`
+- `sync.audioFile` — filename of downloaded audio (e.g. `"Scott Street.mp3"`), `null` if not downloaded
 
 **Errors:**
 
