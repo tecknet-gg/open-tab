@@ -183,12 +183,80 @@ export default defineEventHandler(async (event) => {
     );
     await writeFile(filePath, new Uint8Array(buffer));
 
-    // Build sync entries
+    // Download audio files first, track videoId -> filename mapping
+    const audioByVideoId = new Map<string, string>();
+    const audioFiles: string[] = [];
+
+    if (videosToDownload.length > 0) {
+      const featureCounts = new Map<string, number>();
+      for (const v of videosToDownload) {
+        const key = v.feature ?? 'main';
+        featureCounts.set(key, (featureCounts.get(key) ?? 0) + 1);
+      }
+
+      const featureIndices = new Map<string, number>();
+      for (const v of videosToDownload) {
+        const key = v.feature ?? 'main';
+        const idx = featureIndices.get(key) ?? 0;
+        featureIndices.set(key, idx + 1);
+
+        const audioName = buildAudioFileName(songDir, v.feature, idx, featureCounts.get(key)!);
+        const audioPath = join(outputDir, audioName);
+        const videoUrl = `https://www.youtube.com/watch?v=${v.videoId}`;
+
+        try {
+          await downloadAudio(videoUrl, join(outputDir, `${songDir}-tmp-${v.videoId}`));
+          const exts = ['mp3', 'm4a', 'opus', 'webm'];
+          let found = false;
+          for (const ext of exts) {
+            const candidate = join(outputDir, `${songDir}-tmp-${v.videoId}.${ext}`);
+            try {
+              await access(candidate);
+              const { rename } = await import('node:fs/promises');
+              await rename(candidate, audioPath);
+              audioByVideoId.set(v.videoId, audioName);
+              audioFiles.push(audioName);
+              found = true;
+              break;
+            } catch {}
+          }
+          if (!found) {
+            const candidate = join(outputDir, `${songDir}-tmp-${v.videoId}.mp3`);
+            try {
+              await access(candidate);
+              const { rename } = await import('node:fs/promises');
+              await rename(candidate, audioPath);
+              audioByVideoId.set(v.videoId, audioName);
+              audioFiles.push(audioName);
+            } catch {}
+          }
+        } catch {
+          // Skip failed downloads
+        }
+      }
+    } else if (video && syncVideo?.videoId) {
+      const videoUrl = `https://www.youtube.com/watch?v=${syncVideo.videoId}`;
+      const videoOutput = join(outputDir, `${songDir}.%(ext)s`);
+
+      await downloadAudio(videoUrl, videoOutput);
+
+      const candidate = join(outputDir, `${songDir}.mp3`);
+      try {
+        await access(candidate);
+        const audioName = `${songDir}.mp3`;
+        audioByVideoId.set(syncVideo.videoId, audioName);
+        audioFiles.push(audioName);
+      } catch {}
+    }
+
+    // Build sync entries with filepaths
     const toSyncEntry = (v: SongsterrVideoRecord): SyncEntry => ({
       videoId: v.videoId,
       points: v.points,
       feature: v.feature,
       trackHashes: v.trackHashes ?? [],
+      name: v.feature ?? 'main',
+      audioFile: audioByVideoId.get(v.videoId) ?? null,
     });
 
     const allSync: SyncEntry[] = main ? allVideos.map(toSyncEntry) : [];
@@ -216,69 +284,6 @@ export default defineEventHandler(async (event) => {
 
     const metadataPath = join(outputDir, 'metadata.json');
     await writeFile(metadataPath, JSON.stringify(metadata, null, 2));
-
-    // Download audio files
-    const audioFiles: string[] = [];
-
-    if (videosToDownload.length > 0) {
-      // Count per feature type for naming
-      const featureCounts = new Map<string, number>();
-      for (const v of videosToDownload) {
-        const key = v.feature ?? 'main';
-        featureCounts.set(key, (featureCounts.get(key) ?? 0) + 1);
-      }
-
-      const featureIndices = new Map<string, number>();
-      for (const v of videosToDownload) {
-        const key = v.feature ?? 'main';
-        const idx = featureIndices.get(key) ?? 0;
-        featureIndices.set(key, idx + 1);
-
-        const audioName = buildAudioFileName(songDir, v.feature, idx, featureCounts.get(key)!);
-        const audioPath = join(outputDir, audioName);
-        const videoUrl = `https://www.youtube.com/watch?v=${v.videoId}`;
-
-        try {
-          await downloadAudio(videoUrl, join(outputDir, `${songDir}-tmp-${v.videoId}`));
-          const exts = ['mp3', 'm4a', 'opus', 'webm'];
-          let found = false;
-          for (const ext of exts) {
-            const candidate = join(outputDir, `${songDir}-tmp-${v.videoId}.${ext}`);
-            try {
-              await access(candidate);
-              const { rename } = await import('node:fs/promises');
-              await rename(candidate, audioPath);
-              audioFiles.push(audioName);
-              found = true;
-              break;
-            } catch {}
-          }
-          if (!found) {
-            const candidate = join(outputDir, `${songDir}-tmp-${v.videoId}.mp3`);
-            try {
-              await access(candidate);
-              const { rename } = await import('node:fs/promises');
-              await rename(candidate, audioPath);
-              audioFiles.push(audioName);
-            } catch {}
-          }
-        } catch {
-          // Skip failed downloads
-        }
-      }
-    } else if (video && syncVideo?.videoId) {
-      // Single video download (original behavior)
-      const videoUrl = `https://www.youtube.com/watch?v=${syncVideo.videoId}`;
-      const videoOutput = join(outputDir, `${songDir}.%(ext)s`);
-
-      await downloadAudio(videoUrl, videoOutput);
-
-      const candidate = join(outputDir, `${songDir}.mp3`);
-      try {
-        await access(candidate);
-        audioFiles.push(`${songDir}.mp3`);
-      } catch {}
-    }
 
     const durationMs = Math.round(performance.now() - startedAt);
 

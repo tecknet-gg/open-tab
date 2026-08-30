@@ -200,6 +200,8 @@ export interface SyncEntry {
   points: number[];
   feature: string | null;
   trackHashes: string[];
+  name: string;
+  audioFile: string | null;
 }
 
 export interface TabMetadata {
