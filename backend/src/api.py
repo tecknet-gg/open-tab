@@ -7,6 +7,12 @@ app = FastAPI()
 async def root():
     return {"message": "We are alive!"}
 
+@app.get("/search/{query}")
+def search(query: str):
+    # maybe open up other search params
+    response = requests.get(f"https://www.songsterr.com/api/search?pattern={query}&inst=undefined&tuning=undefined&difficulty=undefined&size=50&from=0&more=true").json()
+    return response
+
 @app.get("/videos/{song_id}")
 def get_videos(song_id: int):
 
