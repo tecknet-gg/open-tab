@@ -2,9 +2,23 @@ from fastapi import FastAPI
 import subprocess
 import requests
 import sys
+import json
+from pathlib import Path
+
+CONFIG_PATH = Path("assets/config.json")
+
+def load_config():
+    if CONFIG_PATH.exists():
+        with open(CONFIG_PATH, "r") as f:
+            return json.load(f)
+    return {}
+
+def save_config(config):
+    with open(CONFIG_PATH, "w") as f:
+        json.dump(config, f, indent=2)
 
 app = FastAPI()
-@app.get("/")
+@app.get("/status")
 async def root():
     return {"message": "We are alive!"}
 
@@ -29,7 +43,7 @@ def get_videos(song_id: int):
         tracks = video_point.get("tracks")
         tracks = tracks if tracks else "All"
 
-        url = f"https://youtu.be/{video_point.get("videoId")}"
+        url = f"https://youtu.be/{video_point.get('videoId')}"
 
         if tracks[0] == 0: # Discard tracks with no instruments
             #print(f"Discarding {feature} - {tracks} - {url}. Missing instruments.")
@@ -64,5 +78,35 @@ def get_videos(song_id: int):
 
 @app.post("/download/{song_id}/{index}")
 def download(song_id: int, index: int):
-    subprocess.run([sys.executable, "sync.py", "--song", str(song_id) , "--video-index", str(index)], check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    config = load_config()
+    cookies = config.get("cookies", None)
+    path = config.get("path", None)
+
+
+    subprocess.run([sys.executable, "sync.py", "--song", str(song_id) , "--video-index", str(index), "--output-dir", "/downloads"], check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     return {"message": "Download started"}
+
+@app.post("/set-browser/{browser}")
+def set_browser(browser: str):
+    if browser not in ["chrome", "firefox", "safari", "edge", "brave", "opera", "vivaldi"]:
+        return {"message": "Invalid browser"}
+
+    try:
+        config = load_config()
+        config["browser"] = browser
+        save_config(config)
+        return {"message": "Browser saved"}
+    except Exception as e:
+        return {"message": f"Error saving browser: {e}"}
+
+@app.post("/set-path/{path}")
+def set_path(path: str):
+    try:
+        config = load_config()
+        config["path"] = path
+        save_config(config)
+        return {"message": "Path saved"}
+    except Exception as e:
+        return {"message": f"Error saving path: {e}"}
+
+

@@ -574,6 +574,8 @@ Examples:
     parser.add_argument("--list-videos", action="store_true",
                         help="List available video entries and exit")
 
+    parser.add_argument("--output-dir", type=str, default="output",help="Output directory")
+
     args = parser.parse_args()
 
     # Parse song ID from URL or raw number
@@ -599,6 +601,10 @@ Examples:
     print("\n[2/5] Fetching video points...")
     entries = fetch_video_points(song_id, revision_id)
 
+    # Output goes next to the original GP file
+    gp_dir = Path(args.output_dir).resolve() if args.output_dir else gp_file.parent
+    gp_dir.mkdir(parents=True, exist_ok=True)
+
     if args.list_videos:
         list_video_entries(entries)
         return
@@ -621,11 +627,10 @@ Examples:
         gp_meta, tracks = gen_gp.fetch_all_tracks(song_id)
         safe = "".join(c if c.isalnum() or c in " -_" else "" for c in
                        f"{meta['artist']} - {meta['title']}").strip()
-        gp_file = Path(f"{safe or 'output'}.gp").resolve()
+        gp_file = gp_dir / f"{safe or 'output'}.gp"
         gen_gp.generate_gp(tracks, gp_file, gp_meta)
 
-    # Output goes next to the original GP file
-    gp_dir = gp_file.parent
+
 
     # Step 4: Download YouTube audio (trimmed to start at measure 1)
     print("\n[4/5] Downloading YouTube audio...")
