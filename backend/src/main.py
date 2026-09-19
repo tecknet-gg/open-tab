@@ -1,0 +1,363 @@
+#!/usr/bin/env python3
+"""
+Guitar Pro YouTube Sync - Interactive CLI
+
+Generates Guitar Pro (.gp) files from Songsterr tabs,
+optionally synced with YouTube audio.
+"""
+
+import sys
+from pathlib import Path
+
+import gen_gp
+from sync import (
+    fetch_song_meta,
+    fetch_video_points,
+    get_video_options,
+    select_video_entry,
+    download_youtube_audio,
+    sync_gp_file,
+    print_summary,
+)
+from utils import load_config, save_config
+
+
+BROWSERS = ["chrome", "firefox", "edge", "brave", "safari", "opera"]
+
+
+def prompt_yes_no(question: str, default: bool = True) -> bool:
+    """Prompt user for yes/no answer."""
+    suffix = "[Y/n]" if default else "[y/N]"
+    while True:
+        answer = input(f"{question} {suffix}: ").strip().lower()
+        if answer == "":
+            return default
+        if answer in ("y", "yes"):
+            return True
+        if answer in ("n", "no"):
+            return False
+        print("  Please enter 'y' or 'n'")
+
+
+def prompt_browser_choice() -> str | None:
+    """Prompt user to select a browser for cookie extraction."""
+    print("\n  YouTube may require authentication for this video.")
+    print("  Select a browser to use cookies from (must be logged into YouTube):")
+    for i, browser in enumerate(BROWSERS, 1):
+        print(f"    {i}. {browser}")
+    skip_num = len(BROWSERS) + 1
+    print(f"    {skip_num}. Skip audio")
+
+    while True:
+        try:
+            choice = input(f"\n  Choice [{skip_num}]: ").strip()
+            if choice == "":
+                return None
+            idx = int(choice)
+            if 1 <= idx <= len(BROWSERS):
+                return BROWSERS[idx - 1]
+            if idx == skip_num:
+                return None
+            print(f"  Please enter a number between 1 and {skip_num}")
+        except ValueError:
+            print("  Please enter a number")
+
+
+def _format_feature_name(feature: str) -> str:
+    """Convert a feature key like 'backing' to a display name like 'Backing Track'."""
+    names = {"backing": "Backing Track", "solo": "Solo", "playthrough": "Playthrough"}
+    return names.get(feature, feature.replace("_", " ").title())
+
+
+def prompt_video_type(entries: list[dict], tracks_meta: list[dict]) -> dict:
+    """Prompt user to select video type from dynamically discovered categories.
+
+    Returns the selected video entry dict.
+    """
+    options = get_video_options(entries, tracks_meta)
+    full_mix = options["full_mix"]
+    categories = options["categories"]  # e.g. {"backing": [...], "solo": [...], "playthrough": [...]}
+
+    # If only full mix is available, skip the menu
+    if not categories:
+        if full_mix:
+            print(f"  Using: Full Mix ({full_mix['videoId']})")
+            return full_mix
+        return select_video_entry(entries)
+
+    # Build category menu
+    menu = []  # list of (display_label, key_or_none)
+    if full_mix:
+        menu.append(("Full Mix", None))
+    for key, items in categories.items():
+        name = _format_feature_name(key)
+        count = f" ({len(items)} available)" if len(items) > 1 else ""
+        menu.append((f"{name}{count}", key))
+
+    print("\nSelect video type:")
+    for i, (label, key) in enumerate(menu, 1):
+        default_tag = " (default)" if i == 1 else ""
+        if key is None:
+            vid = full_mix["videoId"]
+        elif len(categories[key]) == 1:
+            vid = categories[key][0]["entry"]["videoId"]
+        else:
+            vid = None
+        vid_tag = f"  https://youtu.be/{vid}" if vid else ""
+        print(f"  {i}. {label}{default_tag}{vid_tag}")
+
+    while True:
+        try:
+            choice = input(f"Choice [1]: ").strip()
+            if choice == "":
+                idx = 0
+            else:
+                idx = int(choice) - 1
+            if 0 <= idx < len(menu):
+                break
+            print(f"  Please enter a number between 1 and {len(menu)}")
+        except ValueError:
+            print("  Please enter a number")
+
+    _, category_key = menu[idx]
+
+    if category_key is None:
+        print(f"  Using: Full Mix ({full_mix['videoId']})")
+        return full_mix
+
+    # Sub-select for the chosen category
+    items = categories[category_key]
+    type_label = _format_feature_name(category_key).lower()
+
+    # If only one option, use it directly
+    if len(items) == 1:
+        item = items[0]
+        print(f"  Using: {_format_feature_name(category_key)} - {item['label']}")
+        return item["entry"]
+
+    # Show sub-menu
+    print(f"\nSelect {type_label}:")
+    for i, item in enumerate(items, 1):
+        vid = item["entry"]["videoId"]
+        print(f"  {i}. {item['label']}  https://youtu.be/{vid}")
+
+    while True:
+        try:
+            choice = input(f"Choice [1]: ").strip()
+            if choice == "":
+                sub_idx = 0
+            else:
+                sub_idx = int(choice) - 1
+            if 0 <= sub_idx < len(items):
+                break
+            print(f"  Please enter a number between 1 and {len(items)}")
+        except ValueError:
+            print("  Please enter a number")
+
+    selected = items[sub_idx]
+    print(f"  Using: {_format_feature_name(category_key)} - {selected['label']}")
+    return selected["entry"]
+
+
+def prompt_existing_gp_file() -> Path | None:
+    """Prompt user for an existing GP file to sync, or None to generate a new one."""
+    print("\nSync audio to:")
+    print("  1. Generate new GP file (default)")
+    print("  2. Use existing GP file")
+
+    while True:
+        choice = input("Choice [1]: ").strip()
+        if choice in ("", "1"):
+            return None
+        if choice == "2":
+            break
+        print("  Please enter 1 or 2")
+
+    while True:
+        path_str = input("  Path to GP file: ").strip().strip("'\"")
+        if not path_str:
+            continue
+        gp_path = Path(path_str).expanduser().resolve()
+        if gp_path.is_file() and gp_path.suffix.lower() in (".gp", ".gpx", ".gp5", ".gp4"):
+            print(f"  Using: {gp_path}")
+            return gp_path
+        if not gp_path.exists():
+            print(f"  File not found: {gp_path}")
+        else:
+            print(f"  Not a Guitar Pro file: {gp_path}")
+
+
+def try_download_audio(video_id: str, audio_path: Path, trim_start: float, config: dict) -> bool:
+    """Attempt to download audio, with automatic retry using saved browser and manual prompt.
+
+    Returns True if audio was downloaded successfully.
+    """
+    # First attempt: no cookies
+    try:
+        download_youtube_audio(video_id, audio_path, trim_start=trim_start)
+        return True
+    except Exception as e:
+        print(f"\n  Audio download failed: {e}")
+
+    # Second attempt: auto-retry with saved browser
+    saved_browser = config.get("cookie_browser")
+    if saved_browser:
+        print(f"\n  Retrying with saved browser ({saved_browser})...")
+        try:
+            download_youtube_audio(video_id, audio_path, trim_start=trim_start, cookies_browser=saved_browser)
+            return True
+        except Exception as e:
+            print(f"  Still failed: {e}")
+
+    # Ask for browsers until one works or the user explicitly skips audio.
+    while True:
+        browser = prompt_browser_choice()
+        if not browser:
+            print("  Skipping audio.")
+            return False
+
+        print(f"\n  Retrying with {browser} cookies...")
+        try:
+            download_youtube_audio(video_id, audio_path, trim_start=trim_start, cookies_browser=browser)
+            # Save successful browser for next time
+            config["cookie_browser"] = browser
+            save_config(config)
+            print(f"  (Saved {browser} as default browser for next time)")
+            return True
+        except Exception as e:
+            print(f"\n  Download failed: {e}")
+            if browser == "safari" and "operation not permitted" in str(e).lower():
+                print("  macOS blocked access to Safari's cookies.")
+                print("  To use Safari, open System Settings > Privacy & Security > Full Disk Access,")
+                print("  enable the terminal app used to launch this program, then quit and reopen it.")
+            print("  Make sure you are logged into YouTube, or try another browser.")
+
+
+def process_song(config: dict) -> None:
+    """Process a single song (generate GP + optional audio sync)."""
+    # Get song input
+    while True:
+        user_input = input("\nEnter Songsterr URL or song ID (or 'q' to quit): ").strip()
+        if user_input.lower() in ("q", "quit", "exit"):
+            raise SystemExit(0)
+        if not user_input:
+            continue
+        try:
+            song_id = gen_gp.parse_song_id(user_input)
+            break
+        except ValueError as e:
+            print(f"\n  Error: {e}")
+            print("  Examples: https://www.songsterr.com/a/wsa/metallica-master-of-puppets-tab-s84  or  84")
+
+    # Fetch metadata
+    print("\nFetching song info...")
+    try:
+        meta = fetch_song_meta(song_id)
+    except Exception as e:
+        print(f"\n  Error fetching song data: {e}")
+        return
+
+    artist = meta.get("artist", "Unknown")
+    title = meta.get("title", "Unknown")
+    num_tracks = len(meta.get("tracks", []))
+    print(f"  Found: {artist} - {title} ({num_tracks} tracks)")
+
+    # Check for existing GP file to sync
+    safe_name = "".join(c if c.isalnum() or c in " -_" else "" for c in f"{artist} - {title}").strip()
+    existing_gp = prompt_existing_gp_file()
+
+    if existing_gp:
+        gp_file = existing_gp
+        include_audio = True
+        total_steps = 2
+    else:
+        include_audio = prompt_yes_no("\nInclude YouTube audio?", default=True)
+        total_steps = 3 if include_audio else 1
+
+        # Step 1: Generate GP file
+        print(f"\n[1/{total_steps}] Generating Guitar Pro file...")
+        try:
+            gp_meta, tracks = gen_gp.fetch_all_tracks(song_id)
+            gp_file = Path(f"{safe_name or 'output'}.gp").resolve()
+            gen_gp.generate_gp(tracks, gp_file, gp_meta)
+        except Exception as e:
+            print(f"\n  Error generating GP file: {e}")
+            return
+
+        if not include_audio:
+            print(f"\nDone! File saved to: {gp_file}")
+            return
+
+    # Download audio
+    step = total_steps - 1
+    print(f"\n[{step}/{total_steps}] Fetching video data...")
+    revision_id = meta["revisionId"]
+    try:
+        entries = fetch_video_points(song_id, revision_id)
+        tracks_meta = meta.get("tracks", [])
+        entry = prompt_video_type(entries, tracks_meta)
+    except Exception as e:
+        print(f"\n  Error fetching video data: {e}")
+        print("  Continuing without audio...")
+        print(f"\nDone! File saved to: {gp_file}")
+        return
+
+    points = entry["points"]
+    video_id = entry["videoId"]
+    trim_start = points[0] if points else 0.0
+    audio_path = gp_file.parent / ".tmp_audio.mp3"
+
+    audio_ok = try_download_audio(video_id, audio_path, trim_start, config)
+
+    # Sync
+    print(f"\n[{total_steps}/{total_steps}] Syncing audio with tab...")
+    synced_path = gp_file.parent / f"{gp_file.stem}_synced{gp_file.suffix}"
+    mp3_path = audio_path if audio_ok else None
+    bpms = sync_gp_file(gp_file, points, synced_path, mp3_path=mp3_path)
+
+    if audio_path.exists():
+        audio_path.unlink()
+
+    print_summary(bpms, points)
+    if audio_ok:
+        print("\nAudio embedded in synced file.")
+    else:
+        print("\nAudio was not downloaded; the synced file contains tab timing only.")
+    print(f"\nDone! File saved to: {synced_path}")
+
+
+def main():
+    if len(sys.argv) == 2 and sys.argv[1] in ("--self-test", "--live-test"):
+        from diagnostics import run_self_test
+
+        try:
+            run_self_test(live=sys.argv[1] == "--live-test")
+        except Exception as e:
+            print(f"Self-test failed: {e}")
+            raise SystemExit(1)
+        return
+
+    print("=== Guitar Pro YouTube Sync ===")
+
+    config = load_config()
+
+    while True:
+        try:
+            process_song(config)
+            print("\n" + "-" * 40)
+        except SystemExit:
+            print("\nGoodbye!")
+            break
+        except KeyboardInterrupt:
+            print("\n\nGoodbye!")
+            break
+        except EOFError:
+            print("\n\nGoodbye!")
+            break
+        except Exception as e:
+            print(f"\nUnexpected error: {e}")
+            print("You can try another song.\n")
+
+
+if __name__ == "__main__":
+    main()
