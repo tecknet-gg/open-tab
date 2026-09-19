@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 import subprocess
 import requests
+import sys
 
 app = FastAPI()
 @app.get("/")
@@ -60,3 +61,8 @@ def get_videos(song_id: int):
 
 
     return {"output": list(best.values())}
+
+@app.post("/download/{song_id}/{index}")
+def download(song_id: int, index: int):
+    subprocess.run([sys.executable, "sync.py", "--song", str(song_id) , "--video-index", str(index)], check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    return {"message": "Download started"}
