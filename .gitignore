@@ -2,3 +2,4 @@
 .vscode
 backend/src/.venv
 /tabs
+todos.txt

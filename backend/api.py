@@ -1,11 +1,14 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, BackgroundTasks
 import subprocess
 import requests
 import sys
 import json
 from pathlib import Path
+import uuid
+import shutil
 
 CONFIG_PATH = Path("assets/config.json")
+jobs = {}
 
 def load_config():
     if CONFIG_PATH.exists():
@@ -76,15 +79,65 @@ def get_videos(song_id: int):
 
     return {"output": list(best.values())}
 
-@app.post("/download/{song_id}/{index}")
-def download(song_id: int, index: int):
+@app.post("/download/{song_id}/{index}/{feature}")
+def download(song_id: int, index: int, feature: str, background_tasks: BackgroundTasks):
+    job_id = str(uuid.uuid4())
+    jobs[job_id] = {"status": "running", "song_id": song_id, "index": index}
+    background_tasks.add_task(run_download, song_id, index, feature, job_id)
+    return {"message": "Download started", "job_id": job_id}
+
+@app.get("/download/status/{job_id}")
+def download_status(job_id: str):
+    if job_id not in jobs:
+        return {"message": "Job not found"}
+    return {"status": jobs[job_id]["status"]}
+
+
+def run_download(song_id, index, feature, job_id):
     config = load_config()
+    path = Path(config.get("path", None))
     cookies = config.get("cookies", None)
-    path = config.get("path", None)
+
+    if not path:
+        return
+    temp_path = path / f"{job_id}"
+
+    command = [
+        sys.executable, "sync.py", "--song", str(song_id), "--video-index", str(index), "--output-dir", temp_path
+    ]
+
+    if cookies:
+        command.extend(["--cookies", cookies])
+
+    try:
+        subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        files = [file for file in temp_path.iterdir() if file.is_file()]
+        print(f"Downloaded {len(files)} files to {temp_path}")
+        file = files[0]
+
+        title = file.stem.removesuffix("_synced")
+        artist, song = title.split(" - ", 1)
+
+        print(f"{artist} and {song}")
+
+        destination = path/artist/song
+        destination.mkdir(parents=True, exist_ok=True)
+        for file in files:
+            if file.stem.endswith("_synced"):
+                shutil.move(file, destination / f"{feature}_synced.gp")
+            else:
+                shutil.move(file, destination / f"{feature}.gp")
+
+        temp_path.rmdir()
+        print(f"Moved files to {destination}")
+        jobs[job_id]["status"] = "completed"
+
+    except Exception as e:
+        print(f"Download failed: {e}")
+        jobs[job_id]["status"] = "failed"
+        jobs[job_id]["error"] = str(e)
 
 
-    subprocess.run([sys.executable, "sync.py", "--song", str(song_id) , "--video-index", str(index), "--output-dir", "/downloads"], check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    return {"message": "Download started"}
 
 @app.post("/set-browser/{browser}")
 def set_browser(browser: str):
