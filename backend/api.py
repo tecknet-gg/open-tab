@@ -7,6 +7,10 @@ from pathlib import Path
 import uuid
 import shutil
 
+from fastapi.middleware.cors import CORSMiddleware
+
+
+
 CONFIG_PATH = Path("assets/config.json")
 jobs = {}
 
@@ -21,6 +25,13 @@ def save_config(config):
         json.dump(config, f, indent=2)
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_methods=["*"],
+    allow_headers=["*"]
+)
 @app.get("/status")
 async def root():
     return {"message": "We are alive!"}
@@ -69,7 +80,7 @@ def get_videos(song_id: int):
             best[feature] = candidate
             continue
 
-        current_tracks = best[feature]
+        current_tracks = best[feature]["tracks"]
         if tracks == "All" and current_tracks!= "All":
             best[feature] = candidate
 
